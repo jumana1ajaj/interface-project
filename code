@@ -1,0 +1,212 @@
+const int tempPin = A0;
+const int lightPin = A1;
+
+const int RS = 12;
+const int EN = 11;
+const int D4 = 5;
+const int D5 = 4;
+const int D6 = 3;
+const int D7 = 2;
+
+unsigned long prevMillis = 0;
+const long interval = 2000;
+bool showTemp = true;
+
+const float tempOffset = 12.0;
+
+
+byte thermometerIcon[8] = {
+  B00100,
+  B01010,
+  B01010,
+  B01110,
+  B01110,
+  B11111,
+  B11111,
+  B01110
+};
+
+byte lightBulbIcon[8] = {
+  B00100,
+  B01110,
+  B01110,
+  B01110,
+  B00100,
+  B01110,
+  B00100,
+  B00000
+};
+
+// LCD control functions
+void pulseEnable() {
+  digitalWrite(EN, HIGH);
+  delayMicroseconds(1);
+  digitalWrite(EN, LOW);
+  delayMicroseconds(50);
+}
+
+void send4Bits(uint8_t data) {
+  digitalWrite(D4, (data >> 0) & 1);
+  digitalWrite(D5, (data >> 1) & 1);
+  digitalWrite(D6, (data >> 2) & 1);
+  digitalWrite(D7, (data >> 3) & 1);
+  pulseEnable();
+}
+
+void sendCommand(uint8_t command) {
+  digitalWrite(RS, LOW);
+  send4Bits(command >> 4);
+  send4Bits(command & 0x0F);
+  delayMicroseconds(100);
+}
+
+void sendData(uint8_t data) {
+  digitalWrite(RS, HIGH);
+  send4Bits(data >> 4);
+  send4Bits(data & 0x0F);
+  delayMicroseconds(100);
+}
+
+void lcdPrint(const char *str) {
+  while (*str) {
+    sendData(*str++);
+  }
+}
+
+void lcdSetCursor(uint8_t col, uint8_t row) {
+  uint8_t address = (row == 0) ? 0x80 : 0xC0;
+  sendCommand(address + col);
+}
+
+void lcdClear() {
+  sendCommand(0x01);
+  delay(2);
+}
+
+void lcdCreateChar(uint8_t location, uint8_t charmap[]) {
+  location &= 0x7;
+  sendCommand(0x40 | (location << 3));
+  for (int i = 0; i < 8; i++) {
+    sendData(charmap[i]);
+  }
+}
+
+void setup() {
+  // Initialize LCD pins
+  pinMode(RS, OUTPUT);
+  pinMode(EN, OUTPUT);
+  pinMode(D4, OUTPUT);
+  pinMode(D5, OUTPUT);
+  pinMode(D6, OUTPUT);
+  pinMode(D7, OUTPUT);
+  
+  // LCD initialization sequence
+  delay(50);
+  digitalWrite(RS, LOW);
+  digitalWrite(EN, LOW);
+  
+  // Initialization in 4-bit mode
+  send4Bits(0x03);
+  delay(5);
+  send4Bits(0x03);
+  delayMicroseconds(100);
+  send4Bits(0x03);
+  send4Bits(0x02); // Set 4-bit mode
+  
+  // Function set: 4-bit, 2-line, 5x8 dots
+  sendCommand(0x28);
+  // Display on, cursor off, blink off
+  sendCommand(0x0C);
+  // Clear display
+  sendCommand(0x01);
+  delay(2);
+  // Entry mode set: increment, no shift
+  sendCommand(0x06);
+  
+  // Create custom characters
+  lcdCreateChar(0, thermometerIcon);
+  lcdCreateChar(1, lightBulbIcon);
+  
+  Serial.begin(9600);
+  
+  // Set more stable reference voltage
+  analogReference(DEFAULT);
+}
+
+float readTemperature() {
+  const int numReadings = 20;
+  float sum = 0;
+  
+  for (int i = 0; i < numReadings; i++) {
+    sum += analogRead(tempPin);
+    delay(15);
+  }
+  
+  float avgReading = sum / numReadings;
+  float voltage = avgReading * (5.0 / 1023.0); // Using DEFAULT 5V reference
+  
+  // For LM35 
+  float tempC = voltage * 100.0;
+  
+  // Apply calibration offset
+  tempC += tempOffset;
+  
+  return tempC;
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - prevMillis >= interval) {
+    prevMillis = currentMillis;
+    lcdClear();
+
+    if (showTemp) {
+      float tempC = readTemperature();
+      float tempF = (tempC * 9.0 / 5.0) + 32.0;
+
+      // Display temperature
+      lcdSetCursor(0, 0);
+      sendData(0); // Thermometer icon
+      lcdPrint(" Temp: ");
+      
+      // Print temperature with 1 decimal place
+      char tempStr[16];
+      dtostrf(tempC, 5, 1, tempStr);
+      lcdPrint(tempStr);
+      lcdPrint(" C");
+
+      lcdSetCursor(0, 1);
+      lcdPrint("        ");
+      
+      dtostrf(tempF, 5, 1, tempStr);
+      lcdPrint(tempStr);
+      lcdPrint(" F");
+
+      // Debug output
+      Serial.print("Raw ADC: ");
+      Serial.print(analogRead(tempPin));
+      Serial.print(" Temp: ");
+      Serial.print(tempC, 1);
+      Serial.print("C ");
+      Serial.print(tempF, 1);
+      Serial.println("F");
+
+    } else {
+      // Light sensor reading
+      int lightValue = analogRead(lightPin);
+      lcdSetCursor(0, 0);
+      sendData(1); // Light bulb icon
+      lcdPrint(" Light: ");
+      
+      char lightStr[16];
+      itoa(lightValue, lightStr, 10);
+      lcdPrint(lightStr);
+      
+      Serial.print("Light: ");
+      Serial.println(lightValue);
+    }
+
+    showTemp = !showTemp;
+  }
+}
