@@ -1,5 +1,5 @@
 # interface-project
-n this activity you must do the following: 
+In this activity you must do the following: 
 
 Reads temperature from an LM35 sensor on A0
 Reads light level from an LDR on A1
